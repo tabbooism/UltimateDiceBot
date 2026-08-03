@@ -2,7 +2,7 @@ import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
 import org.dreambot.api.methods.container.impl.bank.Bank;
 import org.dreambot.api.methods.input.Camera;
-import org.dreambot.api.methods.input.keyboard.Keyboard;
+import org.dreambot.api.input.Keyboard;
 import org.dreambot.api.methods.interactive.Players;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.tabs.Tab;
@@ -299,22 +299,29 @@ public class UltimateDiceBot extends AbstractScript {
             formatCoins(getTotalBankrollCoins()), formatCoins(sessionProfit), debtLog.size()));
         expireBlacklist();
 
-        if (Trade.receivedRequest()) {
-            Player requester = getTradeRequester();
-            if (requester != null) {
-                String name = requester.getName();
+        String tradingWith = Trade.getTradingWith();
+        if (tradingWith != null || Trade.isOpen()) {
+            String name = tradingWith != null ? tradingWith : currentTradePlayer;
+            if (name == null) {
+                Player requester = getTradeRequester();
+                if (requester != null) name = requester.getName();
+            }
+            
+            if (name != null) {
                 if (isBlacklisted(name)) {
                     logMsg("Ignoring blacklisted player: " + name);
+                    Trade.declineTrade();
                     return 600;
                 }
                 if (isSpamming(name)) {
                     logMsg(name + " is trade-spamming. Adding to blacklist.");
                     blacklistPlayer(name);
+                    Trade.declineTrade();
                     return 600;
                 }
                 currentTradePlayer = name;
                 currentState       = BotState.TRADE_RECEIVED;
-                logMsg("Trade request received from: " + name);
+                logMsg("Trade detected with: " + name);
                 return 200;
             }
         }
@@ -324,7 +331,7 @@ public class UltimateDiceBot extends AbstractScript {
     private int handleTradeReceived() {
         updateStatus("Trade received – accepting from: " + currentTradePlayer);
 
-        boolean accepted = retryAction(() -> Trade.acceptRequest(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
+        boolean accepted = retryAction(() -> Trade.acceptTrade(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
         if (!accepted) {
             logMsg("Failed to accept trade request from " + currentTradePlayer);
             currentState = BotState.ERROR_RECOVERY;
@@ -352,11 +359,11 @@ public class UltimateDiceBot extends AbstractScript {
 
         /* ── Wait up to 3 s for them to offer items ── */
         Sleep.sleepUntil(() -> {
-            Item[] items = Trade.getTheirOfferedItems();
+            Item[] items = Trade.getTheirItems();
             return items != null && items.length > 0;
         }, 3_000);
 
-        Item[] theirItems = Trade.getTheirOfferedItems();
+        Item[] theirItems = Trade.getTheirItems();
         if (theirItems == null || theirItems.length == 0) {
             logMsg("No items offered by " + currentTradePlayer + ". Declining.");
             Trade.declineTrade();
@@ -446,11 +453,11 @@ public class UltimateDiceBot extends AbstractScript {
             currentState = BotState.ERROR_RECOVERY;
             return 500;
         }
-        Sleep.sleepUntil(() -> Trade.isSecondScreenOpen(), 5_000);
+        Sleep.sleepUntil(() -> Trade.canAccept(), 5_000);
         humanDelay();
 
         /* ── Confirm trade (second screen) ── */
-        boolean confirmed = retryAction(() -> Trade.confirmTrade(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
+        boolean confirmed = retryAction(() -> Trade.acceptTrade(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
         if (!confirmed) {
             logMsg("Failed to confirm trade (second screen).");
             currentState = BotState.ERROR_RECOVERY;
@@ -479,7 +486,7 @@ public class UltimateDiceBot extends AbstractScript {
         }
 
         /* ── Locate the winning player ── */
-        Player winner = Players.getNearest(currentTradePlayer);
+        Player winner = Players.closest(currentTradePlayer);
         if (winner == null) {
             logMsg("Winner " + currentTradePlayer + " not nearby. Recording debt.");
             return recordDebtAndContinue();
@@ -514,11 +521,11 @@ public class UltimateDiceBot extends AbstractScript {
             logMsg("Failed to accept payment first screen. Recording debt.");
             return recordDebtAndContinue();
         }
-        Sleep.sleepUntil(() -> Trade.isSecondScreenOpen(), 5_000);
+        Sleep.sleepUntil(() -> Trade.canAccept(), 5_000);
         humanDelay();
 
         /* ── Confirm payment ── */
-        if (!retryAction(() -> Trade.confirmTrade(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS)) {
+        if (!retryAction(() -> Trade.acceptTrade(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS)) {
             logMsg("Failed to confirm payment trade. Recording debt.");
             return recordDebtAndContinue();
         }
@@ -567,7 +574,7 @@ public class UltimateDiceBot extends AbstractScript {
         } else {
             logMsg("Inventory-only mode and out of funds. Stopping script.");
             sendChatMessage("Bot out of funds. Closing session.");
-            stop(false);
+            stop();
         }
         return 2_000;
     }
@@ -596,8 +603,8 @@ public class UltimateDiceBot extends AbstractScript {
      *   1. Preferred currency → 2. Alternate currency → 3. Mixed → false (record debt)
      */
     private boolean offerPayment(long totalCoins) {
-        long invCoins  = Inventory.getCount(COIN_ID);
-        long invTokens = Inventory.getCount(PLATINUM_TOKEN_ID);
+        long invCoins  = Inventory.count(COIN_ID);
+        long invTokens = Inventory.count(PLATINUM_TOKEN_ID);
         long tokenVal  = invTokens * PLATINUM_VALUE;
 
         long tokensNeeded   = totalCoins / PLATINUM_VALUE;
@@ -637,16 +644,16 @@ public class UltimateDiceBot extends AbstractScript {
     }
 
     private boolean offerCoinsOnly(long amount) {
-        return retryAction(() -> Trade.offer(COIN_ID, (int) Math.min(amount, Integer.MAX_VALUE)),
+        return retryAction(() -> Trade.addItem(COIN_ID, (int) Math.min(amount, Integer.MAX_VALUE)),
             TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
     }
 
     private boolean offerTokensAndCoins(long tokens, long coins) {
         boolean ok = true;
         if (tokens > 0)
-            ok = retryAction(() -> Trade.offer(PLATINUM_TOKEN_ID, (int) tokens), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
+            ok = retryAction(() -> Trade.addItem(PLATINUM_TOKEN_ID, (int) tokens), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
         if (ok && coins > 0)
-            ok = retryAction(() -> Trade.offer(COIN_ID, (int) coins), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
+            ok = retryAction(() -> Trade.addItem(COIN_ID, (int) coins), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
         return ok;
     }
 
@@ -663,8 +670,8 @@ public class UltimateDiceBot extends AbstractScript {
 
     /** Returns total value (coins + tokens converted) from inventory */
     private long getTotalBankrollCoins() {
-        return Inventory.getCount(COIN_ID) +
-               Inventory.getCount(PLATINUM_TOKEN_ID) * PLATINUM_VALUE;
+        return Inventory.count(COIN_ID) +
+               Inventory.count(PLATINUM_TOKEN_ID) * PLATINUM_VALUE;
     }
 
     /**
@@ -829,7 +836,7 @@ public class UltimateDiceBot extends AbstractScript {
             if (p.isInteracting(local)) return p;
         }
         // Fallback: nearest non-local player
-        return Players.getNearest(p -> p != null && !p.equals(Players.getLocal()));
+        return Players.closest(p -> p != null && !p.equals(Players.getLocal()));
     }
 
     private void resetTradeState() {
@@ -843,7 +850,7 @@ public class UltimateDiceBot extends AbstractScript {
 
     private void sendChatMessage(String message) {
         try {
-            Keyboard.typeString(message, true);
+            Keyboard.type(message, true);
         } catch (Exception ex) {
             logMsg("Chat message failed: " + ex.getMessage());
         }
