@@ -76,6 +76,7 @@ public class UltimateDiceBot extends AbstractScript {
         TRADE_RECEIVED,
         PROCESSING_BET,
         PROCESSING_HOT_COLD,
+        PROCESSING_FLOWER_POKER,
         PAYING_WINNINGS,
         LOSS_OR_PAYOUT_COMPLETE,
         IDLE_BREAK,
@@ -273,6 +274,7 @@ public class UltimateDiceBot extends AbstractScript {
                 case TRADE_RECEIVED:        return handleTradeReceived();
                 case PROCESSING_BET:        return handleProcessingBet();
                 case PROCESSING_HOT_COLD:   return handleProcessingHotCold();
+                case PROCESSING_FLOWER_POKER: return handleProcessingFlowerPoker();
                 case PAYING_WINNINGS:       return handlePayingWinnings();
                 case LOSS_OR_PAYOUT_COMPLETE: return handleLossOrComplete();
                 case IDLE_BREAK:            return handleIdleBreak();
@@ -301,6 +303,12 @@ public class UltimateDiceBot extends AbstractScript {
     // ─────────────────────────────────────────────────────────────────────────
     // STATE HANDLERS
     // ─────────────────────────────────────────────────────────────────────────
+
+    private int handleProcessingFlowerPoker() {
+        logMsg("Handling Flower Poker game logic (not yet fully implemented)");
+        currentState = BotState.ERROR_RECOVERY; // For now, go to error recovery
+        return 1000;
+    }
 
     private int handleProcessingHotCold() {
         updateStatus("Processing Hot/Cold bet from: " + currentTradePlayer);
@@ -1084,6 +1092,7 @@ public class UltimateDiceBot extends AbstractScript {
     private class ConfigGUI extends JFrame {
 
         /* ── Tab 1 fields ── */
+        private JComboBox<String> gameTypeCombo;
         private JComboBox<String> bankrollSourceCombo;
         private JTextField initialBankrollField, minBetField, maxBetField, lowFundsPctField;
         private JCheckBox  antiBanCheck;
@@ -1102,6 +1111,11 @@ public class UltimateDiceBot extends AbstractScript {
         /* ── Tab 4 fields ── */
         private JCheckBox  discordEnabledCheck;
         private JTextField discordUrlField;
+
+        /* ── Auto-Chat ── */
+        private JCheckBox  autoChatEnabledCheck;
+        private JTextField autoChatMessageField;
+        private JTextField autoChatIntervalField;
 
         /* ── Location ── */
         private JCheckBox  useLocationCheck;
@@ -1122,6 +1136,7 @@ public class UltimateDiceBot extends AbstractScript {
             tabs.addTab("Dice Mechanics",     buildDiceTab());
             tabs.addTab("Security",           buildSecurityTab());
             tabs.addTab("Discord",            buildDiscordTab());
+            tabs.addTab("Auto-Chat",          buildAutoChatTab());
 
             /* ── Status bar ── */
             statusBar = new JLabel(" Ready to start...");
@@ -1158,6 +1173,8 @@ public class UltimateDiceBot extends AbstractScript {
             GridBagConstraints c = gbc();
             int row = 0;
 
+            addRow(p, c, row++, "Game Type:",
+                gameTypeCombo = new JComboBox<>(new String[]{"Dice", "Hot/Cold", "Flower Poker"}));
             addRow(p, c, row++, "Bankroll Source:",
                 bankrollSourceCombo = new JComboBox<>(new String[]{"Bank & Inventory", "Inventory Only"}));
             addRow(p, c, row++, "Initial Bankroll (coins):",
@@ -1308,9 +1325,28 @@ public class UltimateDiceBot extends AbstractScript {
             return p;
         }
 
+        // ── Tab 5: Auto-Chat ───────────────────────────────────────────────
+        private JPanel buildAutoChatTab() {
+            JPanel p = new JPanel(new GridBagLayout());
+            p.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+            GridBagConstraints c = gbc();
+            int row = 0;
+
+            autoChatEnabledCheck = new JCheckBox("Enable Auto-Chat", false);
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2;
+            p.add(autoChatEnabledCheck, c);
+            c.gridwidth = 1;
+
+            addRow(p, c, row++, "Chat Message:", autoChatMessageField = tf(config.autoChatMessage, 40));
+            addRow(p, c, row++, "Interval (seconds):", autoChatIntervalField = tf("60"));
+
+            return p;
+        }
+
         // ── START ACTION ──────────────────────────────────────────────────
         private void onStartBot() {
             try {
+                config.gameType             = GameType.values()[gameTypeCombo.getSelectedIndex()];
                 config.bankrollSource       = bankrollSourceCombo.getSelectedIndex() == 0
                                               ? BankrollSource.BANK_AND_INVENTORY
                                               : BankrollSource.INVENTORY_ONLY;
@@ -1340,6 +1376,10 @@ public class UltimateDiceBot extends AbstractScript {
                 config.blacklistDurationMs    = parseLong(blacklistDurationField,  "Blacklist Duration") * 60_000L;
                 config.discordEnabled         = discordEnabledCheck.isSelected();
                 config.discordWebhookUrl      = discordUrlField.getText().trim();
+
+                config.autoChatEnabled        = autoChatEnabledCheck.isSelected();
+                config.autoChatMessage        = autoChatMessageField.getText().trim();
+                config.autoChatIntervalMs     = parseLong(autoChatIntervalField, "Auto-Chat Interval") * 1_000L;
 
                 /* Validation */
                 if (config.minBet <= 0)                  throw new IllegalArgumentException("Min bet must be > 0");
