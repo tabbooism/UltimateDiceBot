@@ -120,6 +120,12 @@ public class UltimateDiceBot extends AbstractScript {
         boolean discordEnabled            = false;
         String  discordWebhookUrl         = "";
 
+        /* ── Auto-Chat ── */
+        boolean autoChatEnabled           = false;
+        String  autoChatMessage           = "Come try your luck at dice! 7x2, 9x4, 12x4! Hot/Cold 1-100! PM me to play!";
+        long    autoChatIntervalMs        = 60_000L; // 1 minute
+
+
         /* ── Location ── */
         boolean useCustomLocation         = false;
         int     customX                   = 3202;
@@ -147,6 +153,7 @@ public class UltimateDiceBot extends AbstractScript {
         int hotColdMidLow = 48;
         int hotColdMidHigh = 52;
         double hotColdPayout = 2.0; // 2x for correct guess, 1x for tie
+        String hotColdPlayerGuess = "HOT"; // Default guess for player, will be configurable in GUI
 
         /* ── Flower Poker Settings ── */
         // To be defined later based on API capabilities
@@ -201,6 +208,7 @@ public class UltimateDiceBot extends AbstractScript {
     private int     lastDiceSum         = 0;
     private boolean lastRollWin         = false;
     private long    lastPayoutCoins     = 0L;
+    private String  currentHotColdGuess = null; // "HOT" or "COLD"
 
     /* ── session statistics ── */
     private long initialBankrollSnap    = 0L;
@@ -212,6 +220,7 @@ public class UltimateDiceBot extends AbstractScript {
     /* ── timing ── */
     private long lastAntiBanTime        = 0L;
     private long lastBreakTime          = 0L;
+    private long lastAutoChatTime       = 0L;
 
     /* ── misc flags ── */
     private boolean guiLaunched         = false;
@@ -250,6 +259,12 @@ public class UltimateDiceBot extends AbstractScript {
 
             /* ── Random idle break ── */
             if (shouldTakeBreak()) { currentState = BotState.IDLE_BREAK; }
+
+            /* ── Auto-chat ── */
+            if (config.autoChatEnabled && (System.currentTimeMillis() - lastAutoChatTime > config.autoChatIntervalMs)) {
+                sendAutoChatMessage();
+                lastAutoChatTime = System.currentTimeMillis();
+            }
 
             switch (currentState) {
                 case CONFIGURATION_CHECK:   return handleConfigCheck();
@@ -419,6 +434,12 @@ public class UltimateDiceBot extends AbstractScript {
         return 600;
     }
 
+    private void sendAutoChatMessage() {
+        if (config.autoChatMessage != null && !config.autoChatMessage.isBlank()) {
+            sendChatMessage(config.autoChatMessage);
+        }
+    }
+
     private int handleTradeReceived() {
         updateStatus("Trade received – accepting from: " + currentTradePlayer);
 
@@ -509,48 +530,8 @@ public class UltimateDiceBot extends AbstractScript {
 
         currentBetCoins = betCoins;
 
-        // Determine game type and execute logic
-        switch (config.gameType) {
-            case DICE:
-                /* ── Roll two six-sided dice ── */
-                int die1       = random.nextInt(6) + 1;
-                int die2       = random.nextInt(6) + 1;
-                lastDiceSum    = die1 + die2;
-                double mult    = config.payoutTable.getOrDefault(lastDiceSum, 0.0);
-                lastRollWin    = (mult > 0);
-
-                if (lastRollWin) {
-                    long raw = (long) (betCoins * mult);
-                    if (config.feeEnabled && config.feeRate > 0) {
-                        raw -= (long) (raw * config.feeRate / 100.0);
-                    }
-                    lastPayoutCoins = raw;
-                    logMsg(String.format("[%s] Roll %d+%d=%d → WIN  Payout: %s",
-                        currentTradePlayer, die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
-                    discordSend(String.format(
-                        ":game_die: **WIN** | `%s` | Bet: %s | Roll: %d+%d=%d | Payout: %s",
-                        currentTradePlayer, formatCoins(betCoins), die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
-                } else {
-                    lastPayoutCoins = 0L;
-                    logMsg(String.format("[%s] Roll %d+%d=%d → LOSS  Collected: %s",
-                        currentTradePlayer, die1, die2, lastDiceSum, formatCoins(betCoins)));
-                    discordSend(String.format(
-                        ":game_die: **LOSS** | `%s` | Bet: %s | Roll: %d+%d=%d",
-                        currentTradePlayer, formatCoins(betCoins), die1, die2, lastDiceSum));
-                }
-                break;
-            case HOT_COLD:
-                // Hot/Cold logic is handled in handleProcessingHotCold, but we need to set lastRollWin and lastPayoutCoins here
-                // For now, we'll just set a placeholder, actual logic will be in handleProcessingHotCold
-                lastRollWin = true; // Placeholder
-                lastPayoutCoins = betCoins * 2; // Placeholder
-                break;
-            case FLOWER_POKER:
-                // Flower Poker logic not yet implemented
-                lastRollWin = false; // Placeholder
-                lastPayoutCoins = 0L; // Placeholder
-                break;
-        }
+        // Process game logic based on game type
+        processGameLogic();
 
         /* ── Accept first trade screen ── */
         humanDelay();
@@ -573,18 +554,89 @@ public class UltimateDiceBot extends AbstractScript {
         Sleep.sleepUntil(() -> !Trade.isOpen(), 5_000);
 
         totalBets++;
+        currentState = lastRollWin ? BotState.PAYING_WINNINGS : BotState.LOSS_OR_PAYOUT_COMPLETE;
+        return 600;
+    }
+
+    private void processGameLogic() {
         switch (config.gameType) {
             case DICE:
-                currentState = lastRollWin ? BotState.PAYING_WINNINGS : BotState.LOSS_OR_PAYOUT_COMPLETE;
+                processDiceGame();
                 break;
             case HOT_COLD:
-                currentState = BotState.PROCESSING_HOT_COLD;
+                processHotColdGame();
                 break;
             case FLOWER_POKER:
-                currentState = BotState.ERROR_RECOVERY; // Not yet implemented
+                processFlowerPokerGame();
                 break;
         }
-        return 600;
+    }
+
+    private void processDiceGame() {
+        /* ── Roll two six-sided dice ── */
+        int die1       = random.nextInt(6) + 1;
+        int die2       = random.nextInt(6) + 1;
+        lastDiceSum    = die1 + die2;
+        double mult    = config.payoutTable.getOrDefault(lastDiceSum, 0.0);
+        lastRollWin    = (mult > 0);
+
+        if (lastRollWin) {
+            long raw = (long) (currentBetCoins * mult);
+            if (config.feeEnabled && config.feeRate > 0) {
+                raw -= (long) (raw * config.feeRate / 100.0);
+            }
+            lastPayoutCoins = raw;
+            logMsg(String.format("[%s] Roll %d+%d=%d → WIN  Payout: %s",
+                currentTradePlayer, die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
+            discordSend(String.format(
+                ":game_die: **WIN** | `%s` | Bet: %s | Roll: %d+%d=%d | Payout: %s",
+                currentTradePlayer, formatCoins(currentBetCoins), die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
+        } else {
+            lastPayoutCoins = 0L;
+            logMsg(String.format("[%s] Roll %d+%d=%d → LOSS  Collected: %s",
+                currentTradePlayer, die1, die2, lastDiceSum, formatCoins(currentBetCoins)));
+            discordSend(String.format(
+                ":game_die: **LOSS** | `%s` | Bet: %s | Roll: %d+%d=%d",
+                currentTradePlayer, formatCoins(currentBetCoins), die1, die2, lastDiceSum));
+        }
+    }
+
+    private void processHotColdGame() {
+        // Generate random number for Hot/Cold (1-100)
+        int randomNumber = random.nextInt(100) + 1;
+        boolean win = false;
+        long rawPayout = 0L;
+
+        // Determine win/loss based on player's guess (config.hotColdPlayerGuess)
+        // For simplicity, assuming player states their guess in trade message, which is not parsed yet.
+        // For now, let's use a simple condition: if the number is outside the middle range, it's a win.
+        if (config.hotColdPlayerGuess.equalsIgnoreCase("HOT") && randomNumber > config.hotColdMidHigh) {
+            win = true;
+            rawPayout = (long) (currentBetCoins * config.hotColdPayout);
+        } else if (config.hotColdPlayerGuess.equalsIgnoreCase("COLD") && randomNumber < config.hotColdMidLow) {
+            win = true;
+            rawPayout = (long) (currentBetCoins * config.hotColdPayout);
+        } else {
+            win = false;
+            rawPayout = 0L;
+        }
+
+        lastRollWin = win;
+        lastPayoutCoins = rawPayout;
+
+        logMsg(String.format("[%s] Hot/Cold Roll: %d (Guess: %s) → %s", currentTradePlayer, randomNumber, config.hotColdPlayerGuess, win ? "WIN" : "LOSS"));
+        discordSend(String.format(
+            win ? ":fire: **HOT/COLD WIN**" : ":snowflake: **HOT/COLD LOSS**",
+            currentTradePlayer, formatCoins(currentBetCoins), randomNumber, config.hotColdPlayerGuess,
+            win ? "Payout: " + formatCoins(lastPayoutCoins) : ""));
+    }
+
+    private void processFlowerPokerGame() {
+        // Placeholder for Flower Poker logic
+        logMsg("Flower Poker game logic not yet implemented.");
+        lastRollWin = false; // Default to loss for unimplemented game
+        lastPayoutCoins = 0L;
+    }
     }
 
     private int handlePayingWinnings() {
