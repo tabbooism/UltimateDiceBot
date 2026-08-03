@@ -47,7 +47,7 @@ import java.util.concurrent.*;
     name        = "UltimateDiceBot Pro",
     description = "Advanced dice betting bot with platinum token support, discord webhooks, and robust fallbacks",
     author      = "UltimateDiceBot",
-    version     = 2.0,
+    version     = 3.0,
     category    = Category.MISC
 )
 public class UltimateDiceBot extends AbstractScript {
@@ -61,7 +61,7 @@ public class UltimateDiceBot extends AbstractScript {
     private static final int    TRADE_RETRY_MAX       = 3;
     private static final long   TRADE_RETRY_DELAY_MS  = 1_000L;
     private static final long   BANK_RETRY_DELAY_MS   = 60_000L;
-    private static final String VERSION               = "2.0";
+    private static final String    VERSION               = "3.0";
 
     // ─────────────────────────────────────────────────────────────────────────
     // STATE ENUM
