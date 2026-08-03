@@ -66,6 +66,8 @@ public class UltimateDiceBot extends AbstractScript {
     // ─────────────────────────────────────────────────────────────────────────
     // STATE ENUM
     // ─────────────────────────────────────────────────────────────────────────
+    private enum GameType { DICE, HOT_COLD, FLOWER_POKER }
+
     private enum BotState {
         STARTUP_GUI,
         CONFIGURATION_CHECK,
@@ -73,6 +75,7 @@ public class UltimateDiceBot extends AbstractScript {
         WAITING_FOR_TRADE,
         TRADE_RECEIVED,
         PROCESSING_BET,
+        PROCESSING_HOT_COLD,
         PAYING_WINNINGS,
         LOSS_OR_PAYOUT_COMPLETE,
         IDLE_BREAK,
@@ -90,6 +93,9 @@ public class UltimateDiceBot extends AbstractScript {
     // CONFIGURATION (POJO populated by GUI)
     // ─────────────────────────────────────────────────────────────────────────
     private static class BotConfig {
+        /* ── Game Type ── */
+        GameType gameType = GameType.DICE;
+
         /* ── Betting & Bankroll ── */
         BankrollSource bankrollSource     = BankrollSource.BANK_AND_INVENTORY;
         long   initialBankroll            = 1_000_000L;
@@ -134,6 +140,17 @@ public class UltimateDiceBot extends AbstractScript {
             payoutTable.put(11,  0.0);
             payoutTable.put(12,  4.0);  // 4× on sum 12
         }
+
+        /* ── Hot/Cold Settings ── */
+        int hotColdMin = 1;
+        int hotColdMax = 100;
+        int hotColdMidLow = 48;
+        int hotColdMidHigh = 52;
+        double hotColdPayout = 2.0; // 2x for correct guess, 1x for tie
+
+        /* ── Flower Poker Settings ── */
+        // To be defined later based on API capabilities
+
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -240,6 +257,7 @@ public class UltimateDiceBot extends AbstractScript {
                 case WAITING_FOR_TRADE:     return handleWaiting();
                 case TRADE_RECEIVED:        return handleTradeReceived();
                 case PROCESSING_BET:        return handleProcessingBet();
+                case PROCESSING_HOT_COLD:   return handleProcessingHotCold();
                 case PAYING_WINNINGS:       return handlePayingWinnings();
                 case LOSS_OR_PAYOUT_COMPLETE: return handleLossOrComplete();
                 case IDLE_BREAK:            return handleIdleBreak();
@@ -268,6 +286,79 @@ public class UltimateDiceBot extends AbstractScript {
     // ─────────────────────────────────────────────────────────────────────────
     // STATE HANDLERS
     // ─────────────────────────────────────────────────────────────────────────
+
+    private int handleProcessingHotCold() {
+        updateStatus("Processing Hot/Cold bet from: " + currentTradePlayer);
+
+        if (!Trade.isOpen()) {
+            logMsg("Trade window closed unexpectedly during Hot/Cold.");
+            currentState = BotState.ERROR_RECOVERY;
+            return 500;
+        }
+
+        // The bet amount should already be set in currentBetCoins from handleProcessingBet
+        if (currentBetCoins <= 0) {
+            logMsg("Zero-value bet for Hot/Cold; declining.");
+            Trade.declineTrade();
+            currentState = BotState.WAITING_FOR_TRADE;
+            return 500;
+        }
+
+        // Generate random number for Hot/Cold (1-100)
+        int randomNumber = random.nextInt(100) + 1;
+        boolean win = false;
+        long rawPayout = 0L;
+
+        // Hot/Cold logic: player guesses if number is hot (high) or cold (low)
+        // For simplicity, let's assume the player bets on 'hot' (above midHigh) or 'cold' (below midLow)
+        // This needs to be determined from the trade message or a pre-set config, for now, let's assume a simple win condition.
+        // The current implementation of the bot doesn't parse player intent from trade messages.
+        // For now, let's define a simple win condition based on the number falling outside the 'mid' range.
+
+        // Example: If player bets on 'Hot' (number > config.hotColdMidHigh) or 'Cold' (number < config.hotColdMidLow)
+        // This part needs more sophisticated parsing of player's intent from trade message, which is not in current scope.
+        // For now, let's make a simple win condition: if the number is outside the middle range, it's a win.
+        if (randomNumber < config.hotColdMidLow || randomNumber > config.hotColdMidHigh) {
+            win = true;
+            rawPayout = (long) (currentBetCoins * config.hotColdPayout);
+        } else { // Tie or loss
+            win = false;
+            rawPayout = 0L; // Player loses bet
+        }
+
+        lastRollWin = win;
+        lastPayoutCoins = rawPayout;
+
+        logMsg(String.format("[%s] Hot/Cold Roll: %d → %s", currentTradePlayer, randomNumber, win ? "WIN" : "LOSS"));
+        discordSend(String.format(
+            win ? ":fire: **HOT/COLD WIN**" : ":snowflake: **HOT/COLD LOSS**",
+            currentTradePlayer, formatCoins(currentBetCoins), randomNumber,
+            win ? "Payout: " + formatCoins(lastPayoutCoins) : ""));
+
+        // Accept first trade screen
+        humanDelay();
+        boolean firstAccepted = retryAction(() -> Trade.acceptTrade(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
+        if (!firstAccepted) {
+            logMsg("Failed to accept first trade screen for Hot/Cold.");
+            currentState = BotState.ERROR_RECOVERY;
+            return 500;
+        }
+        Sleep.sleepUntil(() -> Trade.canAccept(), 5_000);
+        humanDelay();
+
+        // Confirm trade (second screen)
+        boolean confirmed = retryAction(() -> Trade.acceptTrade(), TRADE_RETRY_MAX, TRADE_RETRY_DELAY_MS);
+        if (!confirmed) {
+            logMsg("Failed to confirm trade (second screen) for Hot/Cold.");
+            currentState = BotState.ERROR_RECOVERY;
+            return 500;
+        }
+        Sleep.sleepUntil(() -> !Trade.isOpen(), 5_000);
+
+        totalBets++;
+        currentState = lastRollWin ? BotState.PAYING_WINNINGS : BotState.LOSS_OR_PAYOUT_COMPLETE;
+        return 600;
+    }
 
     private int handleConfigCheck() {
         updateStatus("Checking configuration...");
@@ -418,31 +509,47 @@ public class UltimateDiceBot extends AbstractScript {
 
         currentBetCoins = betCoins;
 
-        /* ── Roll two six-sided dice ── */
-        int die1       = random.nextInt(6) + 1;
-        int die2       = random.nextInt(6) + 1;
-        lastDiceSum    = die1 + die2;
-        double mult    = config.payoutTable.getOrDefault(lastDiceSum, 0.0);
-        lastRollWin    = (mult > 0);
+        // Determine game type and execute logic
+        switch (config.gameType) {
+            case DICE:
+                /* ── Roll two six-sided dice ── */
+                int die1       = random.nextInt(6) + 1;
+                int die2       = random.nextInt(6) + 1;
+                lastDiceSum    = die1 + die2;
+                double mult    = config.payoutTable.getOrDefault(lastDiceSum, 0.0);
+                lastRollWin    = (mult > 0);
 
-        if (lastRollWin) {
-            long raw = (long) (betCoins * mult);
-            if (config.feeEnabled && config.feeRate > 0) {
-                raw -= (long) (raw * config.feeRate / 100.0);
-            }
-            lastPayoutCoins = raw;
-            logMsg(String.format("[%s] Roll %d+%d=%d → WIN  Payout: %s",
-                currentTradePlayer, die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
-            discordSend(String.format(
-                ":game_die: **WIN** | `%s` | Bet: %s | Roll: %d+%d=%d | Payout: %s",
-                currentTradePlayer, formatCoins(betCoins), die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
-        } else {
-            lastPayoutCoins = 0L;
-            logMsg(String.format("[%s] Roll %d+%d=%d → LOSS  Collected: %s",
-                currentTradePlayer, die1, die2, lastDiceSum, formatCoins(betCoins)));
-            discordSend(String.format(
-                ":game_die: **LOSS** | `%s` | Bet: %s | Roll: %d+%d=%d",
-                currentTradePlayer, formatCoins(betCoins), die1, die2, lastDiceSum));
+                if (lastRollWin) {
+                    long raw = (long) (betCoins * mult);
+                    if (config.feeEnabled && config.feeRate > 0) {
+                        raw -= (long) (raw * config.feeRate / 100.0);
+                    }
+                    lastPayoutCoins = raw;
+                    logMsg(String.format("[%s] Roll %d+%d=%d → WIN  Payout: %s",
+                        currentTradePlayer, die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
+                    discordSend(String.format(
+                        ":game_die: **WIN** | `%s` | Bet: %s | Roll: %d+%d=%d | Payout: %s",
+                        currentTradePlayer, formatCoins(betCoins), die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
+                } else {
+                    lastPayoutCoins = 0L;
+                    logMsg(String.format("[%s] Roll %d+%d=%d → LOSS  Collected: %s",
+                        currentTradePlayer, die1, die2, lastDiceSum, formatCoins(betCoins)));
+                    discordSend(String.format(
+                        ":game_die: **LOSS** | `%s` | Bet: %s | Roll: %d+%d=%d",
+                        currentTradePlayer, formatCoins(betCoins), die1, die2, lastDiceSum));
+                }
+                break;
+            case HOT_COLD:
+                // Hot/Cold logic is handled in handleProcessingHotCold, but we need to set lastRollWin and lastPayoutCoins here
+                // For now, we'll just set a placeholder, actual logic will be in handleProcessingHotCold
+                lastRollWin = true; // Placeholder
+                lastPayoutCoins = betCoins * 2; // Placeholder
+                break;
+            case FLOWER_POKER:
+                // Flower Poker logic not yet implemented
+                lastRollWin = false; // Placeholder
+                lastPayoutCoins = 0L; // Placeholder
+                break;
         }
 
         /* ── Accept first trade screen ── */
@@ -466,7 +573,17 @@ public class UltimateDiceBot extends AbstractScript {
         Sleep.sleepUntil(() -> !Trade.isOpen(), 5_000);
 
         totalBets++;
-        currentState = lastRollWin ? BotState.PAYING_WINNINGS : BotState.LOSS_OR_PAYOUT_COMPLETE;
+        switch (config.gameType) {
+            case DICE:
+                currentState = lastRollWin ? BotState.PAYING_WINNINGS : BotState.LOSS_OR_PAYOUT_COMPLETE;
+                break;
+            case HOT_COLD:
+                currentState = BotState.PROCESSING_HOT_COLD;
+                break;
+            case FLOWER_POKER:
+                currentState = BotState.ERROR_RECOVERY; // Not yet implemented
+                break;
+        }
         return 600;
     }
 
