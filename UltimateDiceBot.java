@@ -1151,7 +1151,8 @@ discordSend(String.format(
         if (!config.discordEnabled || config.discordWebhookUrls.isEmpty()) return;
 
         for (String webhookUrl : config.discordWebhookUrls) {
-        new Thread(() -> {
+            final String currentWebhookUrl = webhookUrl; // Create a final copy for the lambda
+            new Thread(() -> {
             try {
                 URL url = new URL(webhookUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -1172,12 +1173,15 @@ discordSend(String.format(
                     os.write(json.getBytes(StandardCharsets.UTF_8));
                 }
                 int code = conn.getResponseCode();
-                if (code != 204 && code != 200) logMsg("Discord HTTP " + code);
+
+                if (code != 204 && code != 200) logMsg("Discord HTTP " + code + " for " + currentWebhookUrl);
                 conn.disconnect();
             } catch (Exception ex) {
-                logMsg("Discord error: " + ex.getMessage());
+                logMsg("Discord error for " + currentWebhookUrl + ": " + ex.getMessage());
             }
-        }, "discord-webhook").start();
+        }, "discord-webhook-" + currentWebhookUrl.hashCode()).start();
+        }
+    }
     }
 
     private void verifyItemIDs() {
