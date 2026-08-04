@@ -121,11 +121,13 @@ public class UltimateDiceBot extends AbstractScript {
         boolean antiLureEnabled           = true;
         int     tradeSpamLimit            = 5;             // per minute
         int     tradeCancellationLimit    = 3;
+        long    tradeAcceptTimeoutMs      = 30_000L; // 30 seconds for trade acceptance
+
         long    blacklistDurationMs       = 5 * 60_000L;  // 5 minutes
 
         /* ── Discord ── */
         boolean discordEnabled            = false;
-        String  discordWebhookUrl         = "";
+        List<String>  discordWebhookUrls    = new ArrayList<>();
 
         /* ── Auto-Chat ── */
         boolean autoChatEnabled           = false;
@@ -377,10 +379,10 @@ public class UltimateDiceBot extends AbstractScript {
         lastPayoutCoins = rawPayout;
 
         logMsg(String.format("[%s] Hot/Cold Roll: %d → %s", currentTradePlayer, randomNumber, win ? "WIN" : "LOSS"));
-        discordSend(String.format(
-            win ? ":fire: **HOT/COLD WIN**" : ":snowflake: **HOT/COLD LOSS**",
-            currentTradePlayer, formatCoins(currentBetCoins), randomNumber,
-            win ? "Payout: " + formatCoins(lastPayoutCoins) : ""));
+discordSend(String.format(
+                win ? ":fire: **HOT/COLD WIN**" : ":snowflake: **HOT/COLD LOSS**",
+                currentTradePlayer, formatCoins(currentBetCoins), randomNumber,
+                win ? "Payout: " + formatCoins(lastPayoutCoins) : ""), win ? Color.GREEN : Color.RED);
 
         // Accept first trade screen
         humanDelay();
@@ -512,7 +514,7 @@ public class UltimateDiceBot extends AbstractScript {
             currentState = BotState.ERROR_RECOVERY;
             return 500;
         }
-        Sleep.sleepUntil(() -> Trade.isOpen(), 6_000);
+        Sleep.sleepUntil(() -> Trade.isOpen(), config.tradeAcceptTimeoutMs);
         if (!Trade.isOpen()) {
             logMsg("Trade window did not open.");
             currentState = BotState.ERROR_RECOVERY;
@@ -651,16 +653,16 @@ public class UltimateDiceBot extends AbstractScript {
             lastPayoutCoins = raw;
             logMsg(String.format("[%s] Roll %d+%d=%d → WIN  Payout: %s",
                 currentTradePlayer, die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
-            discordSend(String.format(
-                ":game_die: **WIN** | `%s` | Bet: %s | Roll: %d+%d=%d | Payout: %s",
-                currentTradePlayer, formatCoins(currentBetCoins), die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)));
+                discordSend(String.format(
+                    ":game_die: **WIN** | `%s` | Bet: %s | Roll: %d+%d=%d | Payout: %s",
+                    currentTradePlayer, formatCoins(currentBetCoins), die1, die2, lastDiceSum, formatCoins(lastPayoutCoins)), Color.GREEN);
         } else {
             lastPayoutCoins = 0L;
             logMsg(String.format("[%s] Roll %d+%d=%d → LOSS  Collected: %s",
                 currentTradePlayer, die1, die2, lastDiceSum, formatCoins(currentBetCoins)));
-            discordSend(String.format(
-                ":game_die: **LOSS** | `%s` | Bet: %s | Roll: %d+%d=%d",
-                currentTradePlayer, formatCoins(currentBetCoins), die1, die2, lastDiceSum));
+                discordSend(String.format(
+                    ":game_die: **LOSS** | `%s` | Bet: %s | Roll: %d+%d=%d",
+                    currentTradePlayer, formatCoins(currentBetCoins), die1, die2, lastDiceSum), Color.RED);
         }
     }
 
@@ -691,7 +693,7 @@ public class UltimateDiceBot extends AbstractScript {
         discordSend(String.format(
             win ? ":fire: **HOT/COLD WIN**" : ":snowflake: **HOT/COLD LOSS**",
             currentTradePlayer, formatCoins(currentBetCoins), randomNumber, config.hotColdPlayerGuess,
-            win ? "Payout: " + formatCoins(lastPayoutCoins) : ""));
+            win ? "Payout: " + formatCoins(lastPayoutCoins) : ""), win ? Color.GREEN : Color.RED);
     }
 
     private void processFlowerPokerGame() {
@@ -731,7 +733,7 @@ public class UltimateDiceBot extends AbstractScript {
             return recordDebtAndContinue();
         }
 
-        Sleep.sleepUntil(() -> Trade.isOpen(), 8_000);
+        Sleep.sleepUntil(() -> Trade.isOpen(), config.tradeAcceptTimeoutMs);
         if (!Trade.isOpen()) {
             logMsg("Payment trade window did not open. Recording debt.");
             return recordDebtAndContinue();
@@ -1142,10 +1144,16 @@ public class UltimateDiceBot extends AbstractScript {
     }
 
     private void discordSend(String message) {
-        if (!config.discordEnabled || config.discordWebhookUrl == null || config.discordWebhookUrl.isBlank()) return;
+        discordSend(message, null); // Default to no color
+    }
+
+    private void discordSend(String message, Color embedColor) {
+        if (!config.discordEnabled || config.discordWebhookUrls.isEmpty()) return;
+
+        for (String webhookUrl : config.discordWebhookUrls) {
         new Thread(() -> {
             try {
-                URL url = new URL(config.discordWebhookUrl);
+                URL url = new URL(webhookUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
@@ -1153,7 +1161,13 @@ public class UltimateDiceBot extends AbstractScript {
                 conn.setConnectTimeout(5_000);
                 conn.setReadTimeout(5_000);
                 String ts   = DateTimeFormatter.ofPattern("HH:mm:ss").format(LocalDateTime.now());
-                String json = "{\"content\":\"[" + ts + "] " + jsonEscape(message) + "\"}";
+                String json;
+                if (embedColor != null) {
+                    String colorHex = String.format("%06X", (0xFFFFFF & embedColor.getRGB()));
+                    json = "{\"embeds\":[{\"description\":\"" + jsonEscape(message) + "\",\"color\":" + Integer.parseInt(colorHex, 16) + "}]}";
+                } else {
+                    json = "{\"content\":\"[" + ts + "] " + jsonEscape(message) + "\"}";
+                }
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write(json.getBytes(StandardCharsets.UTF_8));
                 }
@@ -1230,12 +1244,12 @@ public class UltimateDiceBot extends AbstractScript {
 
         /* ── Tab 3 fields ── */
         private JCheckBox  antiLureCheck;
-        private JTextField tradeSpamField, tradeCancelField, blacklistDurationField;
+        private JTextField tradeSpamField, tradeCancelField, blacklistDurationField, tradeAcceptTimeoutField;
         private JTextArea  blacklistArea;
 
         /* ── Tab 4 fields ── */
         private JCheckBox  discordEnabledCheck;
-        private JTextField discordUrlField;
+        private JTextArea  discordUrlsArea;
 
         /* ── Auto-Chat ── */
         private JCheckBox  autoChatEnabledCheck;
@@ -1403,6 +1417,7 @@ public class UltimateDiceBot extends AbstractScript {
             addRow(p, c, row++, "Trade Spam Limit (per minute):", tradeSpamField = tf("5"));
             addRow(p, c, row++, "Trade Cancellation Limit:",      tradeCancelField = tf("3"));
             addRow(p, c, row++, "Blacklist Duration (minutes):",  blacklistDurationField = tf("5"));
+            addRow(p, c, row++, "Trade Accept Timeout (seconds):", tradeAcceptTimeoutField = tf("30"));
 
             /* Blacklist viewer */
             blacklistArea = new JTextArea(5, 30);
@@ -1440,17 +1455,20 @@ public class UltimateDiceBot extends AbstractScript {
             p.add(discordEnabledCheck, c);
             c.gridwidth = 1;
 
-            c.gridx = 0; c.gridy = row;   c.weightx = 0;
-            p.add(new JLabel("Webhook URL:"), c);
-            discordUrlField = new JTextField("https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN", 35);
-            c.gridx = 1; c.weightx = 1;
-            p.add(discordUrlField, c);
-            row++;
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2; c.weightx = 0;
+            p.add(new JLabel("Webhook URLs (one per line):"), c);
+            discordUrlsArea = new JTextArea(5, 35);
+            discordUrlsArea.setText(String.join("\n", config.discordWebhookUrls));
+            JScrollPane scrollPane = new JScrollPane(discordUrlsArea);
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2; c.fill = GridBagConstraints.BOTH; c.weightx = 1; c.weighty = 1;
+            p.add(scrollPane, c);
+            c.gridwidth = 1; c.weighty = 0;
 
             JButton testBtn = new JButton("Send Test Message");
             testBtn.addActionListener(e -> {
                 config.discordEnabled      = true;
-                config.discordWebhookUrl   = discordUrlField.getText().trim();
+                config.discordWebhookUrls.clear();
+                config.discordWebhookUrls.add(discordUrlsArea.getText().trim());
                 discordSend("**UltimateDiceBot Pro** test message. Webhook is working!");
                 JOptionPane.showMessageDialog(this,
                     "Test message sent – check your Discord channel.", "Test", JOptionPane.INFORMATION_MESSAGE);
@@ -1555,8 +1573,13 @@ public class UltimateDiceBot extends AbstractScript {
                 config.tradeSpamLimit  = (int) parseLong(tradeSpamField,           "Trade Spam Limit");
                 config.tradeCancellationLimit = (int) parseLong(tradeCancelField,  "Cancellation Limit");
                 config.blacklistDurationMs    = parseLong(blacklistDurationField,  "Blacklist Duration") * 60_000L;
+                config.tradeAcceptTimeoutMs   = parseLong(tradeAcceptTimeoutField, "Trade Accept Timeout") * 1_000L;
                 config.discordEnabled         = discordEnabledCheck.isSelected();
-                config.discordWebhookUrl      = discordUrlField.getText().trim();
+                config.discordWebhookUrls.clear();
+                Arrays.stream(discordUrlsArea.getText().split("\n"))
+                      .map(String::trim)
+                      .filter(s -> !s.isEmpty())
+                      .forEach(config.discordWebhookUrls::add);
 
                 config.autoChatEnabled        = autoChatEnabledCheck.isSelected();
                 config.autoChatMessage        = autoChatMessageField.getText().trim();
@@ -1582,8 +1605,10 @@ public class UltimateDiceBot extends AbstractScript {
                 if (config.lowFundsThresholdPct < 0 || config.lowFundsThresholdPct > 100)
                     throw new IllegalArgumentException("Low funds threshold must be 0–100");
                 if (config.discordEnabled) {
-                    if (!config.discordWebhookUrl.startsWith("https://discord.com/api/webhooks/"))
-                        throw new IllegalArgumentException("Invalid Discord webhook URL");
+                    for (String url : config.discordWebhookUrls) {
+                        if (!url.startsWith("https://discord.com/api/webhooks/"))
+                            throw new IllegalArgumentException("Invalid Discord webhook URL: " + url);
+                    }
                 }
 
                 logMsg("GUI configuration saved. Starting bot...");
