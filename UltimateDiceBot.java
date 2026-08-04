@@ -7,7 +7,11 @@ import org.dreambot.api.methods.interactive.Players;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.tabs.Tab;
 import org.dreambot.api.methods.tabs.Tabs;
+import org.dreambot.api.methods.chat.Chat;
+import org.dreambot.api.methods.clan.ClanChat;
 import org.dreambot.api.methods.trade.Trade;
+import org.dreambot.api.methods.widget.Widget;
+import org.dreambot.api.methods.widget.Widgets;
 import org.dreambot.api.methods.walking.impl.Walking;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.script.Category;
@@ -273,9 +277,9 @@ public class UltimateDiceBot extends AbstractScript {
             /* ── Random idle break ── */
             if (shouldTakeBreak()) { currentState = BotState.IDLE_BREAK; }
 
-            /* ── Auto-chat ── */
-            if (config.autoChatEnabled && (System.currentTimeMillis() - lastAutoChatTime > config.autoChatIntervalMs)) {
-                sendAutoChatMessage();
+            /* ── Advanced Chat ── */
+            if (config.advancedChatEnabled && (System.currentTimeMillis() - lastAutoChatTime > config.chatIntervalMs)) {
+                sendAdvancedChatMessage();
                 lastAutoChatTime = System.currentTimeMillis();
             }
 
@@ -1041,19 +1045,22 @@ public class UltimateDiceBot extends AbstractScript {
         try {
             switch (type) {
                 case PUBLIC:
-                    Keyboard.type(message, true);
+                    Chat.say(message);
                     break;
                 case PRIVATE:
-                    // Logic for private chat (e.g., opening private chat tab, typing, sending)
-                    // This would require more DreamBot API interaction, placeholder for now
-                    logMsg("Private chat not fully implemented: " + message);
-                    Keyboard.type(message, true); // Fallback to public for now
+                    // DreamBot API does not have a direct Chat.sendPrivateMessage(player, message) method.
+                    // It typically involves opening the private chat tab for a specific player and then typing.
+                    // For now, we'll log and fall back to public chat, as direct private messaging is complex without a target player.
+                    logMsg("Private chat to specific player not yet implemented. Sending publicly: " + message);
+                    Chat.say(message);
                     break;
                 case CLAN:
-                    // Logic for clan chat (e.g., opening clan chat tab, typing, sending)
-                    // This would require more DreamBot API interaction, placeholder for now
-                    logMsg("Clan chat not fully implemented: " + message);
-                    Keyboard.type(message, true); // Fallback to public for now
+                    if (!ClanChat.isInClanChat()) {
+                        logMsg("Not in clan chat. Cannot send clan message.");
+                        Chat.say(message); // Fallback to public for now
+                    } else {
+                        ClanChat.say(message);
+                    }
                     break;
             }
         } catch (Exception ex) {
