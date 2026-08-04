@@ -50,7 +50,7 @@ import java.util.concurrent.*;
 //   - Tabbed Swing GUI with all settings
 // ================================================================================
 @ScriptManifest(
-    name        = "UltimateDiceBot Pro",
+    name        = "xCloutx",
     description = "Advanced dice betting bot with platinum token support, discord webhooks, and robust fallbacks",
     author      = "UltimateDiceBot",
     version     = 3.0,

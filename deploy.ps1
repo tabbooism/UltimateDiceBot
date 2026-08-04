@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ============================================================
-#  UltimateDiceBot Pro — All-In-One Windows Deploy Script
-#  deploy.ps1  |  Version 2.0
+#      xCloutx — All-In-One Windows Deploy Script
+#  deploy.ps1  |  Version 3.0
 # ============================================================
 #  Usage:
 #    .\deploy.ps1                          # auto-detect everything
@@ -15,7 +15,7 @@ param(
     [string]$JavaHome        = "",
     [string]$DreamBotJar     = "",
     [string]$SourceFile      = "UltimateDiceBot.java",
-    [string]$OutputJar       = "UltimateDiceBot.jar",
+    [string]$OutputJar       = "xCloutx.jar",
     [switch]$SkipCopy,
     [switch]$Verbose
 )
@@ -37,7 +37,7 @@ function Write-Info   { param([string]$Msg) Write-Host "[INFO] $Msg"  -Foregroun
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Magenta
-Write-Host "   UltimateDiceBot Pro v2.0 — AIO Deploy Script (Windows)"    -ForegroundColor Magenta
+Write-Host "   xCloutx v3.0 — AIO Deploy Script (Windows)"    -ForegroundColor Magenta
 Write-Host "============================================================" -ForegroundColor Magenta
 Write-Host ""
 
@@ -241,6 +241,8 @@ if ($jarExit -ne 0) {
 
 $jarSize = [math]::Round((Get-Item $jarPath).Length / 1KB, 1)
 Write-Ok "JAR created: $jarPath  ($jarSize KB)"
+Write-Host ""
+Write-Host "  IMPORTANT: If you previously used UltimateDiceBot, please remove UltimateDiceBot.jar from your DreamBot scripts folder to avoid conflicts." -ForegroundColor Yellow
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 6 — COPY TO DREAMBOT SCRIPTS FOLDER
@@ -283,7 +285,7 @@ else {
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "   BUILD SUCCESSFUL — UltimateDiceBot Pro v2.0"               -ForegroundColor Green
+Write-Host "   BUILD SUCCESSFUL — xCloutx v3.0"               -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Source  : $SourceFile"                    -ForegroundColor White
@@ -293,7 +295,7 @@ Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor Cyan
 Write-Host "    1. Open DreamBot client"
 Write-Host "    2. Click the Folder icon in the script selector"
-Write-Host "    3. Refresh the script list — 'UltimateDiceBot Pro' will appear"
+Write-Host "    3. Refresh the script list — 'xCloutx' will appear"
 Write-Host "    4. Select the script and click Start"
 Write-Host "    5. Configure settings in the GUI and click 'Start UltimateDiceBot Pro'"
 Write-Host ""
