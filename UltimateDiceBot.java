@@ -126,6 +126,17 @@ public class UltimateDiceBot extends AbstractScript {
         String  autoChatMessage           = "Come try your luck at dice! 7x2, 9x4, 12x4! Hot/Cold 1-100! PM me to play!";
         long    autoChatIntervalMs        = 60_000L; // 1 minute
 
+        /* ── Advanced Chat ── */
+        boolean advancedChatEnabled       = false;
+        enum ChatType { PUBLIC, PRIVATE, CLAN }
+        ChatType defaultChatType          = ChatType.PUBLIC;
+        String  publicChatMessage         = "Come try your luck at dice! 7x2, 9x4, 12x4! Hot/Cold 1-100! PM me to play!";
+        String  privateChatMessage        = "Hey {player}, ready to roll the dice? 7x2, 9x4, 12x4! Hot/Cold 1-100!";
+        String  clanChatMessage           = "Clan, anyone up for some dice? 7x2, 9x4, 12x4! Hot/Cold 1-100!";
+        long    chatIntervalMs            = 30_000L; // 30 seconds
+        boolean adaptToSwitches           = true; // Adapt chat based on game scenario
+
+
 
         /* ── Location ── */
         boolean useCustomLocation         = false;
@@ -445,7 +456,7 @@ public class UltimateDiceBot extends AbstractScript {
 
     private void sendAutoChatMessage() {
         if (config.autoChatMessage != null && !config.autoChatMessage.isBlank()) {
-            sendChatMessage(config.autoChatMessage);
+            sendChatMessage(config.autoChatMessage, BotConfig.ChatType.PUBLIC);
         }
     }
 
@@ -747,11 +758,11 @@ public class UltimateDiceBot extends AbstractScript {
                 currentState = BotState.WAITING_FOR_TRADE;
             } else {
                 logMsg("Bank reload failed. Will retry next cycle.");
-                sendChatMessage("Temporarily out of funds. Please check back shortly.");
+                sendChatMessage("Temporarily out of funds. Please check back shortly.", BotConfig.ChatType.PUBLIC);
             }
         } else {
             logMsg("Inventory-only mode and out of funds. Stopping script.");
-            sendChatMessage("Bot out of funds. Closing session.");
+            sendChatMessage("Bot out of funds. Closing session.", BotConfig.ChatType.PUBLIC);
             stop();
         }
         return 2_000;
@@ -951,7 +962,7 @@ public class UltimateDiceBot extends AbstractScript {
         DebtRecord debt = new DebtRecord(player, coins);
         debtLog.add(debt);
         logMsg("DEBT RECORDED: " + debt);
-        sendChatMessage("@" + player + " Insufficient funds for automatic payout. Manual payout will be arranged.");
+        sendChatMessage("@" + player + " Insufficient funds for automatic payout. Manual payout will be arranged.", BotConfig.ChatType.PUBLIC);
         discordSend(":ledger: **Debt Recorded** | Player: `" + player + "` | Amount: " + formatCoins(coins));
     }
 
@@ -1026,7 +1037,57 @@ public class UltimateDiceBot extends AbstractScript {
 
     private void humanDelay() { sleep(100 + random.nextInt(300)); }
 
-    private void sendChatMessage(String message) {
+    private void sendChatMessage(String message, BotConfig.ChatType type) {
+        try {
+            switch (type) {
+                case PUBLIC:
+                    Keyboard.type(message, true);
+                    break;
+                case PRIVATE:
+                    // Logic for private chat (e.g., opening private chat tab, typing, sending)
+                    // This would require more DreamBot API interaction, placeholder for now
+                    logMsg("Private chat not fully implemented: " + message);
+                    Keyboard.type(message, true); // Fallback to public for now
+                    break;
+                case CLAN:
+                    // Logic for clan chat (e.g., opening clan chat tab, typing, sending)
+                    // This would require more DreamBot API interaction, placeholder for now
+                    logMsg("Clan chat not fully implemented: " + message);
+                    Keyboard.type(message, true); // Fallback to public for now
+                    break;
+            }
+        } catch (Exception ex) {
+            logMsg("Chat message failed: " + ex.getMessage());
+        }
+    }
+
+    private void sendAdvancedChatMessage() {
+        if (!config.advancedChatEnabled) return;
+
+        String message = "";
+        BotConfig.ChatType type = config.defaultChatType;
+
+        // Determine message and type based on configuration and potential game scenario (PVP world awareness to be added later)
+        switch (config.defaultChatType) {
+            case PUBLIC:
+                message = config.publicChatMessage;
+                break;
+            case PRIVATE:
+                // For private chat, we might need to target a specific player, which is not yet implemented.
+                // For now, it will use the private chat message but send it publicly.
+                message = config.privateChatMessage.replace("{player}", ""); // Remove placeholder for now
+                break;
+            case CLAN:
+                message = config.clanChatMessage;
+                break;
+        }
+
+        if (message != null && !message.isBlank()) {
+            sendChatMessage(message, type);
+        }
+    }
+
+    private void logMsg(String msg) {
         try {
             Keyboard.type(message, true);
         } catch (Exception ex) {
@@ -1133,6 +1194,17 @@ public class UltimateDiceBot extends AbstractScript {
         /* ── Auto-Chat ── */
         private JCheckBox  autoChatEnabledCheck;
         private JTextField autoChatMessageField;
+        private JTextField autoChatIntervalField;
+
+        /* ── Advanced Chat ── */
+        private JCheckBox  advancedChatEnabledCheck;
+        private JComboBox<String> defaultChatTypeCombo;
+        private JTextField publicChatMessageField;
+        private JTextField privateChatMessageField;
+        private JTextField clanChatMessageField;
+        private JTextField chatIntervalField;
+        private JCheckBox  adaptToSwitchesCheck;
+
         private JTextField autoChatIntervalField;
 
         /* ── Location ── */
@@ -1358,6 +1430,30 @@ public class UltimateDiceBot extends AbstractScript {
             addRow(p, c, row++, "Chat Message:", autoChatMessageField = tf(config.autoChatMessage, 40));
             addRow(p, c, row++, "Interval (seconds):", autoChatIntervalField = tf("60"));
 
+            /* ── Advanced Chat ── */
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2; c.insets = new Insets(15, 5, 4, 5);
+            p.add(new JLabel("<html><b>Advanced Chat Settings</b></html>"), c);
+            c.insets = new Insets(4, 5, 4, 5);
+            c.gridwidth = 1;
+
+            advancedChatEnabledCheck = new JCheckBox("Enable Advanced Chat", false);
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2;
+            p.add(advancedChatEnabledCheck, c);
+            c.gridwidth = 1;
+
+            addRow(p, c, row++, "Default Chat Type:",
+                defaultChatTypeCombo = new JComboBox<>(new String[]{"Public", "Private", "Clan"}));
+            addRow(p, c, row++, "Public Chat Message:", publicChatMessageField = tf(config.publicChatMessage, 40));
+            addRow(p, c, row++, "Private Chat Message:", privateChatMessageField = tf(config.privateChatMessage, 40));
+            addRow(p, c, row++, "Clan Chat Message:", clanChatMessageField = tf(config.clanChatMessage, 40));
+            addRow(p, c, row++, "Chat Interval (seconds):", chatIntervalField = tf("30"));
+
+            adaptToSwitchesCheck = new JCheckBox("Adapt Chat to Game Scenario (e.g., PVP)", true);
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2;
+            p.add(adaptToSwitchesCheck, c);
+            c.gridwidth = 1;
+
+
             return p;
         }
 
@@ -1398,6 +1494,15 @@ public class UltimateDiceBot extends AbstractScript {
                 config.autoChatEnabled        = autoChatEnabledCheck.isSelected();
                 config.autoChatMessage        = autoChatMessageField.getText().trim();
                 config.autoChatIntervalMs     = parseLong(autoChatIntervalField, "Auto-Chat Interval") * 1_000L;
+
+                config.advancedChatEnabled    = advancedChatEnabledCheck.isSelected();
+                config.defaultChatType        = ChatType.values()[defaultChatTypeCombo.getSelectedIndex()];
+                config.publicChatMessage      = publicChatMessageField.getText().trim();
+                config.privateChatMessage     = privateChatMessageField.getText().trim();
+                config.clanChatMessage        = clanChatMessageField.getText().trim();
+                config.chatIntervalMs         = parseLong(chatIntervalField, "Chat Interval") * 1_000L;
+                config.adaptToSwitches        = adaptToSwitchesCheck.isSelected();
+
 
                 /* Validation */
                 if (config.minBet <= 0)                  throw new IllegalArgumentException("Min bet must be > 0");
