@@ -9,7 +9,9 @@ import org.dreambot.api.methods.tabs.Tab;
 import org.dreambot.api.methods.tabs.Tabs;
 import org.dreambot.api.methods.chat.Chat;
 import org.dreambot.api.methods.clan.ClanChat;
+import org.dreambot.api.methods.combat.Combat;
 import org.dreambot.api.methods.trade.Trade;
+import org.dreambot.api.methods.world.World;
 import org.dreambot.api.methods.widget.Widget;
 import org.dreambot.api.methods.widget.Widgets;
 import org.dreambot.api.methods.walking.impl.Walking;
@@ -139,6 +141,12 @@ public class UltimateDiceBot extends AbstractScript {
         String  clanChatMessage           = "Clan, anyone up for some dice? 7x2, 9x4, 12x4! Hot/Cold 1-100!";
         long    chatIntervalMs            = 30_000L; // 30 seconds
         boolean adaptToSwitches           = true; // Adapt chat based on game scenario
+
+        /* ── PVP Anti-Lure ── */
+        boolean pvpAntiLureEnabled        = true;
+        String  pvpLureWarningMessage     = "{player}, don't try to lure the host! Your RSN has been logged.";
+        int     pvpLureCombatLevelDiff    = 20; // Max combat level difference for a player to be considered a potential lurer
+
 
 
 
@@ -438,6 +446,13 @@ public class UltimateDiceBot extends AbstractScript {
             }
             
             if (name != null) {
+                if (config.pvpAntiLureEnabled && isPotentialLurer(name)) {
+                    logMsg("Potential lurer detected: " + name + ". Sending warning and blacklisting.");
+                    sendChatMessage(config.pvpLureWarningMessage.replace("{player}", name), BotConfig.ChatType.PUBLIC);
+                    blacklistPlayer(name);
+                    Trade.declineTrade();
+                    return 600;
+                }
                 if (isBlacklisted(name)) {
                     logMsg("Ignoring blacklisted player: " + name);
                     Trade.declineTrade();
@@ -456,6 +471,30 @@ public class UltimateDiceBot extends AbstractScript {
             }
         }
         return 600;
+    }
+
+    private boolean isPotentialLurer(String playerName) {
+        if (!World.isPVPWorld() && Combat.getWildernessLevel() == 0) {
+            return false; // Not in a PVP world or wilderness
+        }
+
+        Player self = Players.getLocal();
+        Player potentialLurer = Players.closest(playerName);
+
+        if (self == null || potentialLurer == null) {
+            return false;
+        }
+
+        int selfCombatLevel = Combat.getCombatLevel();
+        int lurerCombatLevel = potentialLurer.getCombatLevel();
+
+        // Check if combat level difference exceeds the configured threshold
+        if (Math.abs(selfCombatLevel - lurerCombatLevel) > config.pvpLureCombatLevelDiff) {
+            return true;
+        }
+
+        // Additional checks could be added here, e.g., if the player is in a specific outfit, or has certain items.
+        return false;
     }
 
     private void sendAutoChatMessage() {
@@ -1212,6 +1251,12 @@ public class UltimateDiceBot extends AbstractScript {
         private JTextField chatIntervalField;
         private JCheckBox  adaptToSwitchesCheck;
 
+        /* ── PVP Anti-Lure ── */
+        private JCheckBox  pvpAntiLureEnabledCheck;
+        private JTextField pvpLureWarningMessageField;
+        private JTextField pvpLureCombatLevelDiffField;
+
+
         private JTextField autoChatIntervalField;
 
         /* ── Location ── */
@@ -1455,6 +1500,21 @@ public class UltimateDiceBot extends AbstractScript {
             addRow(p, c, row++, "Clan Chat Message:", clanChatMessageField = tf(config.clanChatMessage, 40));
             addRow(p, c, row++, "Chat Interval (seconds):", chatIntervalField = tf("30"));
 
+            /* ── PVP Anti-Lure ── */
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2; c.insets = new Insets(15, 5, 4, 5);
+            p.add(new JLabel("<html><b>PVP Anti-Lure Settings</b></html>"), c);
+            c.insets = new Insets(4, 5, 4, 5);
+            c.gridwidth = 1;
+
+            pvpAntiLureEnabledCheck = new JCheckBox("Enable PVP Anti-Lure", true);
+            c.gridx = 0; c.gridy = row++; c.gridwidth = 2;
+            p.add(pvpAntiLureEnabledCheck, c);
+            c.gridwidth = 1;
+
+            addRow(p, c, row++, "Lure Warning Message:", pvpLureWarningMessageField = tf(config.pvpLureWarningMessage, 40));
+            addRow(p, c, row++, "Max Combat Level Difference for Lurer:", pvpLureCombatLevelDiffField = tf("20"));
+
+
             adaptToSwitchesCheck = new JCheckBox("Adapt Chat to Game Scenario (e.g., PVP)", true);
             c.gridx = 0; c.gridy = row++; c.gridwidth = 2;
             p.add(adaptToSwitchesCheck, c);
@@ -1509,6 +1569,11 @@ public class UltimateDiceBot extends AbstractScript {
                 config.clanChatMessage        = clanChatMessageField.getText().trim();
                 config.chatIntervalMs         = parseLong(chatIntervalField, "Chat Interval") * 1_000L;
                 config.adaptToSwitches        = adaptToSwitchesCheck.isSelected();
+
+                config.pvpAntiLureEnabled     = pvpAntiLureEnabledCheck.isSelected();
+                config.pvpLureWarningMessage  = pvpLureWarningMessageField.getText().trim();
+                config.pvpLureCombatLevelDiff = (int) parseLong(pvpLureCombatLevelDiffField, "PVP Lure Combat Level Difference");
+
 
 
                 /* Validation */
