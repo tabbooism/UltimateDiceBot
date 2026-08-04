@@ -238,6 +238,7 @@ public class UltimateDiceBot extends AbstractScript {
         logMsg("UltimateDiceBot Pro v" + VERSION + " loading...");
         startTime    = System.currentTimeMillis();
         currentState = BotState.STARTUP_GUI;
+        verifyItemIDs();
     }
 
     @Override
@@ -1056,6 +1057,23 @@ public class UltimateDiceBot extends AbstractScript {
                 logMsg("Discord error: " + ex.getMessage());
             }
         }, "discord-webhook").start();
+    }
+
+    private void verifyItemIDs() {
+        String coinName = new Item(COIN_ID, 1).getName();
+        String platinumTokenName = new Item(PLATINUM_TOKEN_ID, 1).getName();
+
+        if (!"Coins".equalsIgnoreCase(coinName)) {
+            logMsg("CRITICAL ERROR: COIN_ID " + COIN_ID + " does not match 'Coins'. Found: " + coinName);
+            stop();
+            return;
+        }
+        if (!"Platinum token".equalsIgnoreCase(platinumTokenName)) {
+            logMsg("CRITICAL ERROR: PLATINUM_TOKEN_ID " + PLATINUM_TOKEN_ID + " does not match 'Platinum token'. Found: " + platinumTokenName);
+            stop();
+            return;
+        }
+        logMsg("Item IDs verified: Coins (995), Platinum token (13204).");
     }
 
     private void logMsg(String msg) {
